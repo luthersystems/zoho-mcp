@@ -110,9 +110,9 @@ def configure_server(args: argparse.Namespace) -> Dict[str, Any]:
         logger.warning(msg)
 
     # Prepare server configuration
+    # Note: FastMCP only accepts 'name' parameter, not 'version'
     server_config = {
         "name": "zoho-books",
-        "version": "1.0.0",
     }
 
     return server_config

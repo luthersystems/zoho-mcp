@@ -239,7 +239,7 @@ async def email_invoice(
     
     # Prepare data for API request
     data = {
-        "to_mail": to_email,
+        "to_mail_ids": to_email,
         "subject": subject,
         "body": body,
         "send_customer_statement": send_customer_statement,

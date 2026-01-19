@@ -4,8 +4,9 @@ Contact Management Tools for Zoho Books MCP Integration Server.
 This module provides MCP tools for managing contacts (customers and vendors) in Zoho Books.
 """
 
+import json
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, Union, TYPE_CHECKING
 
 # Only used for type checking
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ from zoho_mcp.models.contacts import (
     ContactsListResponse,
 )
 from zoho_mcp.tools.api import zoho_api_request_async
+from zoho_mcp.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +108,17 @@ async def list_contacts(
         raise
 
 
-async def create_customer(**kwargs) -> Dict[str, Any]:
+async def create_customer(
+    json_data: Optional[Union[str, Dict[str, Any]]] = None,
+    **kwargs
+) -> Dict[str, Any]:
     """
     Create a new customer in Zoho Books.
     
     Args:
-        **kwargs: Customer details including:
+        json_data: Optional JSON input as a string or dict. If provided, this will be used
+                   instead of kwargs. If a string, it will be parsed as JSON.
+        **kwargs: Customer details (used if json_data is not provided) including:
           - contact_name (required): Name of the customer
           - email: Primary email address
           - phone: Primary phone number
@@ -132,11 +139,24 @@ async def create_customer(**kwargs) -> Dict[str, Any]:
     Raises:
         Exception: If validation fails or the API request fails
     """
-    logger.info(f"Creating customer with name: {kwargs.get('contact_name')}")
+    # Parse json_data if provided
+    if json_data is not None:
+        if isinstance(json_data, str):
+            try:
+                data_dict = json.loads(json_data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {str(e)}")
+        else:
+            data_dict = json_data
+    else:
+        # Use kwargs for backwards compatibility
+        data_dict = kwargs
     
-    # Convert the kwargs to a CustomerInput model for validation
+    logger.info(f"Creating customer with name: {data_dict.get('contact_name')}")
+    
+    # Convert the data to a CustomerInput model for validation
     try:
-        customer_data = CustomerInput.model_validate(kwargs)
+        customer_data = CustomerInput.model_validate(data_dict)
     except Exception as e:
         logger.error(f"Validation error creating customer: {str(e)}")
         raise ValueError(f"Invalid customer data: {str(e)}")
@@ -162,12 +182,17 @@ async def create_customer(**kwargs) -> Dict[str, Any]:
         raise
 
 
-async def create_vendor(**kwargs) -> Dict[str, Any]:
+async def create_vendor(
+    json_data: Optional[Union[str, Dict[str, Any]]] = None,
+    **kwargs
+) -> Dict[str, Any]:
     """
     Create a new vendor in Zoho Books.
     
     Args:
-        **kwargs: Vendor details including:
+        json_data: Optional JSON input as a string or dict. If provided, this will be used
+                   instead of kwargs. If a string, it will be parsed as JSON.
+        **kwargs: Vendor details (used if json_data is not provided) including:
           - contact_name (required): Name of the vendor
           - email: Primary email address
           - phone: Primary phone number
@@ -188,11 +213,25 @@ async def create_vendor(**kwargs) -> Dict[str, Any]:
     Raises:
         Exception: If validation fails or the API request fails
     """
-    logger.info(f"Creating vendor with name: {kwargs.get('contact_name')}")
+    # Parse json_data if provided
+    if json_data is not None:
+        if isinstance(json_data, str):
+            try:
+                data_dict = json.loads(json_data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {str(e)}")
+        else:
+            data_dict = json_data
+    else:
+        # Use kwargs for backwards compatibility
+        # Note: INPUT_FORMAT env var can be set to "json" or "kwargs" to indicate preference
+        data_dict = kwargs
     
-    # Convert the kwargs to a VendorInput model for validation
+    logger.info(f"Creating vendor with name: {data_dict.get('contact_name')}")
+    
+    # Convert the data to a VendorInput model for validation
     try:
-        vendor_data = VendorInput.model_validate(kwargs)
+        vendor_data = VendorInput.model_validate(data_dict)
     except Exception as e:
         logger.error(f"Validation error creating vendor: {str(e)}")
         raise ValueError(f"Invalid vendor data: {str(e)}")
@@ -297,13 +336,19 @@ async def delete_contact(contact_id: str) -> Dict[str, Any]:
         raise
 
 
-async def update_contact(contact_id: str, **kwargs) -> Dict[str, Any]:
+async def update_contact(
+    contact_id: str,
+    json_data: Optional[Union[str, Dict[str, Any]]] = None,
+    **kwargs
+) -> Dict[str, Any]:
     """
     Update an existing contact in Zoho Books.
     
     Args:
         contact_id: ID of the contact to update
-        **kwargs: Contact details to update including:
+        json_data: Optional JSON input as a string or dict. If provided, this will be used
+                   instead of kwargs. If a string, it will be parsed as JSON.
+        **kwargs: Contact details to update (used if json_data is not provided) including:
           - contact_name: Name of the contact
           - email: Primary email address
           - phone: Primary phone number
@@ -326,8 +371,19 @@ async def update_contact(contact_id: str, **kwargs) -> Dict[str, Any]:
     """
     logger.info(f"Updating contact with ID: {contact_id}")
     
-    # Prepare data for API request - only include fields that were provided
-    data = {k: v for k, v in kwargs.items() if v is not None}
+    # Parse json_data if provided
+    if json_data is not None:
+        if isinstance(json_data, str):
+            try:
+                data = json.loads(json_data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {str(e)}")
+        else:
+            data = json_data
+    else:
+        # Use kwargs for backwards compatibility - only include fields that were provided
+        # Note: INPUT_FORMAT env var can be set to "json" or "kwargs" to indicate preference
+        data = {k: v for k, v in kwargs.items() if v is not None}
     
     if not data:
         raise ValueError("No fields provided to update")
@@ -462,9 +518,15 @@ list_contacts.parameters = {  # type: ignore
 create_customer.name = "create_customer"  # type: ignore
 create_customer.description = "Create a new customer in Zoho Books"  # type: ignore
 create_customer.parameters = {  # type: ignore
+    "json_data": {
+        "type": ["string", "object"],
+        "description": "Optional JSON input as a string or dict. If provided, this will be used instead of individual parameters.",
+        "optional": True,
+    },
     "contact_name": {
         "type": "string", 
-        "description": "Name of the customer (required)",
+        "description": "Name of the customer (required if json_data not provided)",
+        "optional": True,
     },
     "email": {
         "type": "string",
@@ -531,9 +593,15 @@ create_customer.parameters = {  # type: ignore
 create_vendor.name = "create_vendor"  # type: ignore
 create_vendor.description = "Create a new vendor in Zoho Books"  # type: ignore
 create_vendor.parameters = {  # type: ignore
+    "json_data": {
+        "type": ["string", "object"],
+        "description": "Optional JSON input as a string or dict. If provided, this will be used instead of individual parameters.",
+        "optional": True,
+    },
     "contact_name": {
         "type": "string", 
-        "description": "Name of the vendor (required)",
+        "description": "Name of the vendor (required if json_data not provided)",
+        "optional": True,
     },
     "email": {
         "type": "string",
@@ -621,6 +689,11 @@ update_contact.parameters = {  # type: ignore
     "contact_id": {
         "type": "string",
         "description": "ID of the contact to update",
+    },
+    "json_data": {
+        "type": ["string", "object"],
+        "description": "Optional JSON input as a string or dict. If provided, this will be used instead of individual parameters.",
+        "optional": True,
     },
     "contact_name": {
         "type": "string",

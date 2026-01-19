@@ -118,6 +118,13 @@ class Settings:
     REQUEST_TIMEOUT: int = int(os.environ.get("REQUEST_TIMEOUT", "60"))
     MAX_RETRIES: int = int(os.environ.get("MAX_RETRIES", "3"))
     
+    # Input format preference (for contact tools)
+    # Can be "json" or "kwargs" (default: "kwargs" for backwards compatibility)
+    # When set to "json", indicates preference for JSON input format
+    # Also support RESPONSE_FORMAT as an alias (user's preferred naming)
+    _input_format = os.environ.get("INPUT_FORMAT") or os.environ.get("RESPONSE_FORMAT") or "kwargs"
+    INPUT_FORMAT: str = _input_format.lower()
+    
     def as_dict(self) -> Dict[str, Any]:
         """Return settings as a dictionary."""
         return {

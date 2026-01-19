@@ -46,7 +46,7 @@ class TestPrompts:
     async def test_invoice_collection_workflow_prompt(self):
         """Test the invoice collection workflow prompt."""
         # Create and test the prompt
-        mcp = FastMCP(name="test", version="1.0.0")
+        mcp = FastMCP(name="test")
         register_prompts(mcp)
         
         # Get the invoice collection workflow function
@@ -91,7 +91,7 @@ class TestPrompts:
     async def test_monthly_invoicing_prompt(self):
         """Test the monthly invoicing workflow prompt."""
         # Create and test the prompt
-        mcp = FastMCP(name="test", version="1.0.0")
+        mcp = FastMCP(name="test")
         register_prompts(mcp)
         
         # Get the monthly invoicing function
@@ -132,7 +132,7 @@ class TestPrompts:
     async def test_expense_tracking_workflow_prompt(self):
         """Test the expense tracking workflow prompt."""
         # Create and test the prompt
-        mcp = FastMCP(name="test", version="1.0.0")
+        mcp = FastMCP(name="test")
         register_prompts(mcp)
         
         # Get the expense tracking function
@@ -179,7 +179,7 @@ class TestPrompts:
     def test_prompt_arguments_structure(self):
         """Test that all prompt arguments have the correct structure."""
         # Create and test the prompts
-        mcp = FastMCP(name="test", version="1.0.0")
+        mcp = FastMCP(name="test")
         register_prompts(mcp)
         
         # Check each prompt's arguments
@@ -199,7 +199,7 @@ class TestPrompts:
     def test_prompt_messages_content(self):
         """Test that all prompt messages have valid TextContent."""
         # Create and test the prompts
-        mcp = FastMCP(name="test", version="1.0.0")
+        mcp = FastMCP(name="test")
         register_prompts(mcp)
         
         # Check each prompt's messages

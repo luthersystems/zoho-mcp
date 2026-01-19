@@ -4,6 +4,7 @@ Invoice Management Tools for Zoho Books MCP Integration Server.
 This module provides MCP tools for managing invoices in Zoho Books.
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 from datetime import date
@@ -106,12 +107,17 @@ async def list_invoices(
         raise
 
 
-async def create_invoice(**kwargs) -> Dict[str, Any]:
+async def create_invoice(
+    json_data: Optional[Union[str, Dict[str, Any]]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Create a new invoice in Zoho Books.
     
     Args:
-        **kwargs: Invoice details including:
+        json_data: Optional JSON input as a string or dict. If provided, this will be used
+                   instead of kwargs. If a string, it will be parsed as JSON.
+        kwargs: Optional dict of invoice details (used if json_data is not provided) including:
           - customer_id (required): ID of the customer
           - invoice_number: Custom invoice number
           - reference_number: Reference number
@@ -132,11 +138,27 @@ async def create_invoice(**kwargs) -> Dict[str, Any]:
     Raises:
         Exception: If validation fails or the API request fails
     """
-    logger.info(f"Creating invoice for customer ID: {kwargs.get('customer_id')}")
+    # Parse json_data if provided
+    if json_data is not None:
+        if isinstance(json_data, str):
+            try:
+                data_dict = json.loads(json_data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {str(e)}")
+        else:
+            data_dict = json_data
+    else:
+        # Use kwargs for backwards compatibility
+        # Note: INPUT_FORMAT env var can be set to "json" or "kwargs" to indicate preference
+        if kwargs is None:
+            kwargs = {}
+        data_dict = kwargs
     
-    # Convert the kwargs to a CreateInvoiceInput model for validation
+    logger.info(f"Creating invoice for customer ID: {data_dict.get('customer_id')}")
+    
+    # Convert the data to a CreateInvoiceInput model for validation
     try:
-        invoice_data = CreateInvoiceInput.model_validate(kwargs)
+        invoice_data = CreateInvoiceInput.model_validate(data_dict)
     except Exception as e:
         logger.error(f"Validation error creating invoice: {str(e)}")
         raise ValueError(f"Invalid invoice data: {str(e)}")
@@ -499,9 +521,20 @@ list_invoices.parameters = {  # type: ignore
 create_invoice.name = "create_invoice"  # type: ignore
 create_invoice.description = "Create a new invoice in Zoho Books"  # type: ignore
 create_invoice.parameters = {  # type: ignore
+    "json_data": {
+        "type": ["string", "object"],
+        "description": "Optional JSON input as a string or dict. If provided, this will be used instead of individual parameters.",
+        "optional": True,
+    },
+    "kwargs": {
+        "type": "object",
+        "description": "Optional dict of invoice details (used if json_data is not provided). Can also pass individual parameters directly.",
+        "optional": True,
+    },
     "customer_id": {
         "type": "string", 
-        "description": "ID of the customer (required)",
+        "description": "ID of the customer (required if json_data not provided)",
+        "optional": True,
     },
     "invoice_number": {
         "type": "string",

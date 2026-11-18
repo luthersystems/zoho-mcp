@@ -7,7 +7,7 @@ name = "zoho-books-mcp"
 version = "0.1.0"
 description = "Connect your Zoho Books account to AI assistants like Claude Desktop through the Model Context Protocol (MCP)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Keenan Keeling", email = "keenan@example.com"},
@@ -19,14 +19,17 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Accounting",
 ]
 dependencies = [
-    "mcp>=1.6.0",
+    # mcp 2.x renamed FastMCP to MCPServer and changed its API; this server
+    # is written against 1.x and fails to import on 2.x (see requirements.txt).
+    # 1.10.0 is the first release whose FastMCP.resource() takes title=.
+    "mcp>=1.10.0,<2",
     "httpx>=0.25.0",
     # certifi and python-multipart are transitive; their floors keep out
     # releases with known advisories (see requirements.txt).
@@ -61,3 +64,14 @@ Changelog = "https://github.com/kkeeling/zoho-mcp/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["zoho_mcp"]
+
+[tool.pytest.ini_options]
+# Only tests/ holds unit tests. The test_*.py scripts at the repo root are
+# manual tools: test_all_endpoints.py calls the live Zoho API and exits when
+# credentials are missing, and test_package_validation.py shells out to an
+# installed package. Collecting them would make `pytest` fail on any machine
+# without Zoho credentials, CI included.
+testpaths = ["tests"]
+# Set explicitly so pytest-asyncio does not warn and so each async test and
+# fixture gets its own event loop.
+asyncio_default_fixture_loop_scope = "function"

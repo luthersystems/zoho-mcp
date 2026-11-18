@@ -1,5 +1,10 @@
 # MCP SDK
-mcp>=1.6.0
+# Capped below 2: mcp 2.x removed mcp.server.fastmcp (FastMCP became
+# MCPServer, with API changes), so `import zoho_mcp` fails on it. Moving to 2.x
+# is a port of server.py, resources.py and prompts.py, not a version bump.
+# The floor is 1.10.0, the first release whose FastMCP.resource() takes
+# title= (resources.py passes it).
+mcp>=1.10.0,<2
 
 # HTTP Client
 httpx>=0.25.0

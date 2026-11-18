@@ -15,7 +15,7 @@ IMPORTANT: Install all dependencies in the `zoho-mcp` conda environment.
 - Type check: `mypy zoho_mcp`
 
 ## Code Style Guidelines
-- Python 3.9+ with type hints throughout
+- Python 3.10+ with type hints throughout (mcp 1.x needs 3.10)
 - Follow PEP 8 style guidelines
 - Maximum line length: 100 characters
 - Use docstrings for all functions, classes, and modules

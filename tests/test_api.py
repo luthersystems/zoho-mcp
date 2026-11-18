@@ -26,18 +26,6 @@ from zoho_mcp.tools.api import (
 from zoho_mcp.config import settings
 
 
-# Mock the FastMCP class
-class MockFastMCP(MagicMock):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.tool = MagicMock()
-        self.tool.return_value = lambda func: func
-
-
-# Patch the FastMCP class
-patch("mcp.server.fastmcp.FastMCP", MockFastMCP).start()
-
-
 # Test loading token from cache
 def test_load_token_from_cache_not_exists():
     """Test loading token when cache file doesn't exist."""

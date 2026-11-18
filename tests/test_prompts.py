@@ -1,216 +1,195 @@
 """
 Test suite for Zoho Books MCP prompt templates.
+
+The tests go through a real FastMCP server (list_prompts and get_prompt), the
+same path a client uses, so they catch a prompt that registers but renders
+wrongly. An earlier version of the prompts returned an mcp.types.Prompt
+object, which FastMCP renders as a JSON dump of the argument list; reading
+the prompt back through get_prompt is what shows that.
 """
 
+import re
+
 import pytest
-import asyncio
 from unittest.mock import MagicMock
 
 from mcp.server.fastmcp import FastMCP
-from mcp.types import Prompt, PromptMessage, TextContent
+from mcp.types import TextContent
 
 from zoho_mcp.prompts import register_prompts
+from zoho_mcp.server import register_tools
+
+PROMPT_ARGUMENTS = {
+    "invoice_collection_workflow": {
+        "required": {"customer_info", "items_info", "send_preference"},
+        "optional": {"payment_terms", "payment_reminder"},
+    },
+    "monthly_invoicing": {
+        "required": {"client_selection", "billing_period", "services_items", "send_action"},
+        "optional": {"payment_terms"},
+    },
+    "expense_tracking_workflow": {
+        "required": {"expense_count", "expense_date", "amount", "vendor", "category"},
+        "optional": {
+            "description",
+            "payment_method",
+            "receipt_available",
+            "tax_deductible",
+            "project_customer",
+        },
+    },
+}
 
 
 @pytest.fixture
-def mock_mcp():
-    """Create a mock FastMCP server instance."""
-    mcp = MagicMock(spec=FastMCP)
-    mcp.prompt = MagicMock()
-    return mcp
+def mcp():
+    """A real FastMCP server with the prompts registered."""
+    server = FastMCP(name="test")
+    register_prompts(server)
+    return server
+
+
+async def _render(mcp: FastMCP, name: str, arguments: dict) -> str:
+    """Render a prompt through FastMCP and return its single text message."""
+    result = await mcp.get_prompt(name, arguments)
+    assert len(result.messages) == 1
+    message = result.messages[0]
+    assert message.role == "user"
+    assert isinstance(message.content, TextContent)
+    return message.content.text
 
 
 class TestPrompts:
     """Test suite for MCP prompt templates."""
-    
-    def test_register_prompts(self, mock_mcp):
-        """Test that all prompts are registered with the MCP server."""
-        # Register prompts
+
+    def test_register_prompts(self):
+        """Every prompt is registered under its name."""
+        mock_mcp = MagicMock(spec=FastMCP)
         register_prompts(mock_mcp)
-        
-        # Check that prompt decorator was called for each prompt
-        assert mock_mcp.prompt.call_count == 3  # We have 3 prompts
-        
-        # Check the prompt names that were registered
+
         registered_names = [call[0][0] for call in mock_mcp.prompt.call_args_list]
-        expected_names = [
+        assert sorted(registered_names) == sorted(PROMPT_ARGUMENTS)
+
+    @pytest.mark.asyncio
+    async def test_prompt_arguments(self, mcp):
+        """Each prompt exposes its arguments, with the right ones required."""
+        prompts = {p.name: p for p in await mcp.list_prompts()}
+        assert set(prompts) == set(PROMPT_ARGUMENTS)
+
+        for name, expected in PROMPT_ARGUMENTS.items():
+            arguments = {a.name: a for a in prompts[name].arguments}
+            assert set(arguments) == expected["required"] | expected["optional"], name
+            for arg_name, arg in arguments.items():
+                assert arg.required == (arg_name in expected["required"]), (name, arg_name)
+                # A client shows the description next to the field; without
+                # it the user sees only a bare name like send_action.
+                assert arg.description, (name, arg_name)
+            assert prompts[name].description
+
+    @pytest.mark.asyncio
+    async def test_invoice_collection_workflow_prompt(self, mcp):
+        """The invoice prompt includes the caller's details and the tool steps."""
+        text = await _render(
+            mcp,
             "invoice_collection_workflow",
+            {
+                "customer_info": "Acme Corp",
+                "items_info": "10 hours consulting at 150",
+                "send_preference": "email",
+                "payment_terms": "Net 30",
+            },
+        )
+
+        assert "Acme Corp" in text
+        assert "10 hours consulting at 150" in text
+        assert "Net 30" in text
+        for tool in ("list_contacts", "create_invoice", "email_invoice", "record_payment"):
+            assert tool in text
+        # The workflow guidance, not a serialised prompt definition.
+        assert '"arguments"' not in text
+        # An optional argument that was not given is left out.
+        assert "Payment reminder" not in text
+
+    @pytest.mark.asyncio
+    async def test_monthly_invoicing_prompt(self, mcp):
+        """The monthly invoicing prompt includes the caller's details and the tool steps."""
+        text = await _render(
+            mcp,
             "monthly_invoicing",
+            {
+                "client_selection": "all retainer clients",
+                "billing_period": "current month",
+                "services_items": "monthly retainer",
+                "send_action": "keep as drafts",
+            },
+        )
+
+        assert "all retainer clients" in text
+        assert "current month" in text
+        assert "keep as drafts" in text
+        for tool in ("list_contacts", "list_invoices", "create_invoice"):
+            assert tool in text
+        assert "Payment terms" not in text
+
+    @pytest.mark.asyncio
+    async def test_expense_tracking_workflow_prompt(self, mcp):
+        """The expense prompt includes the caller's details and the tool steps."""
+        text = await _render(
+            mcp,
             "expense_tracking_workflow",
-        ]
-        
-        for name in expected_names:
-            assert name in registered_names
-    
+            {
+                "expense_count": "single",
+                "expense_date": "2025-01-15",
+                "amount": "120.50",
+                "vendor": "Office Depot",
+                "category": "office supplies",
+                "payment_method": "company card",
+            },
+        )
+
+        assert "Office Depot" in text
+        assert "120.50" in text
+        assert "company card" in text
+        for tool in ("create_vendor", "create_expense", "categorize_expense", "get_expense"):
+            assert tool in text
+
     @pytest.mark.asyncio
-    async def test_invoice_collection_workflow_prompt(self):
-        """Test the invoice collection workflow prompt."""
-        # Create and test the prompt
-        mcp = FastMCP(name="test")
-        register_prompts(mcp)
-        
-        # Get the invoice collection workflow function
-        workflow_func = None
-        for prompt_name, func in mcp._prompts.items():
-            if prompt_name == "invoice_collection_workflow":
-                workflow_func = func
-                break
-        
-        assert workflow_func is not None
-        
-        # Call the function
-        result = await workflow_func()
-        
-        # Verify the result
-        assert isinstance(result, Prompt)
-        assert result.name == "invoice_collection_workflow"
-        assert result.description == "Complete workflow for creating, sending, and collecting payment for an invoice"
-        
-        # Check messages structure
-        assert len(result.messages) == 8
-        assert all(isinstance(msg, PromptMessage) for msg in result.messages)
-        
-        # Check that messages alternate between user and assistant
-        for i, msg in enumerate(result.messages):
-            expected_role = "user" if i % 2 == 0 else "assistant"
-            assert msg.role == expected_role
-        
-        # Check arguments
-        expected_args = [
-            "customer_info",
-            "items_info",
-            "payment_terms",
-            "send_preference",
-            "send_action",
-        ]
-        assert len(result.arguments) == len(expected_args)
-        for arg in result.arguments:
-            assert arg["name"] in expected_args
-    
+    async def test_empty_required_argument_is_kept(self, mcp):
+        """A required argument sent empty still shows in the prompt."""
+        text = await _render(
+            mcp,
+            "invoice_collection_workflow",
+            {"customer_info": "", "items_info": "x", "send_preference": "draft"},
+        )
+        assert "- Customer: \n" in text
+
     @pytest.mark.asyncio
-    async def test_monthly_invoicing_prompt(self):
-        """Test the monthly invoicing workflow prompt."""
-        # Create and test the prompt
-        mcp = FastMCP(name="test")
-        register_prompts(mcp)
-        
-        # Get the monthly invoicing function
-        monthly_func = None
-        for prompt_name, func in mcp._prompts.items():
-            if prompt_name == "monthly_invoicing":
-                monthly_func = func
-                break
-        
-        assert monthly_func is not None
-        
-        # Call the function
-        result = await monthly_func()
-        
-        # Verify the result
-        assert isinstance(result, Prompt)
-        assert result.name == "monthly_invoicing"
-        assert result.description == "Efficient workflow for creating multiple invoices for recurring clients"
-        
-        # Check messages
-        assert len(result.messages) == 6
-        
-        # Check arguments include bulk operation parameters
-        arg_names = [arg["name"] for arg in result.arguments]
-        assert "current_month" in arg_names
-        assert "bulk_preferences" in arg_names
-        assert "client_list" in arg_names
-        assert "total_count" in arg_names
-        assert "total_amount" in arg_names
-        assert "average_amount" in arg_names
-        
-        # Check content includes bulk operation guidance
-        first_assistant_msg = result.messages[1]
-        assert "Monthly Bulk Invoicing Workflow" in first_assistant_msg.content.text
-        assert "Invoice ALL active recurring clients" in first_assistant_msg.content.text
-    
+    async def test_missing_required_argument_is_refused(self, mcp):
+        """FastMCP refuses a render that leaves out a required argument."""
+        with pytest.raises(Exception, match="customer_info"):
+            await mcp.get_prompt(
+                "invoice_collection_workflow",
+                {"items_info": "x", "send_preference": "draft"},
+            )
+
     @pytest.mark.asyncio
-    async def test_expense_tracking_workflow_prompt(self):
-        """Test the expense tracking workflow prompt."""
-        # Create and test the prompt
-        mcp = FastMCP(name="test")
-        register_prompts(mcp)
-        
-        # Get the expense tracking function
-        expense_func = None
-        for prompt_name, func in mcp._prompts.items():
-            if prompt_name == "expense_tracking_workflow":
-                expense_func = func
-                break
-        
-        assert expense_func is not None
-        
-        # Call the function
-        result = await expense_func()
-        
-        # Verify the result
-        assert isinstance(result, Prompt)
-        assert result.name == "expense_tracking_workflow"
-        assert result.description == "Comprehensive workflow for recording, categorizing, and managing business expenses"
-        
-        # Check messages
-        assert len(result.messages) == 10
-        
-        # Check arguments include expense-specific fields
-        arg_names = [arg["name"] for arg in result.arguments]
-        assert "expense_details" in arg_names
-        assert "amount" in arg_names
-        assert "vendor" in arg_names
-        assert "category" in arg_names
-        assert "payment_method" in arg_names
-        assert "receipt_count" in arg_names
-        assert "billable_amount" in arg_names
-        
-        # Check content includes expense categories
-        category_msg = result.messages[3]
-        assert "Travel & Transportation" in category_msg.content.text
-        assert "Meals & Entertainment" in category_msg.content.text
-        assert "Office Supplies" in category_msg.content.text
-        
-        # Check final message includes expense tracking tips
-        final_msg = result.messages[-1]
-        assert "Expense Tracking Tips" in final_msg.content.text
-        assert "Keep all receipts for tax documentation" in final_msg.content.text
-    
-    def test_prompt_arguments_structure(self):
-        """Test that all prompt arguments have the correct structure."""
-        # Create and test the prompts
-        mcp = FastMCP(name="test")
-        register_prompts(mcp)
-        
-        # Check each prompt's arguments
-        for prompt_name, func in mcp._prompts.items():
-            # Call the function asynchronously
-            prompt = asyncio.run(func())
-            
-            # Check each argument
-            for arg in prompt.arguments:
-                assert "name" in arg
-                assert "description" in arg
-                assert "required" in arg
-                assert isinstance(arg["name"], str)
-                assert isinstance(arg["description"], str)
-                assert isinstance(arg["required"], bool)
-    
-    def test_prompt_messages_content(self):
-        """Test that all prompt messages have valid TextContent."""
-        # Create and test the prompts
-        mcp = FastMCP(name="test")
-        register_prompts(mcp)
-        
-        # Check each prompt's messages
-        for prompt_name, func in mcp._prompts.items():
-            # Call the function asynchronously
-            prompt = asyncio.run(func())
-            
-            # Check each message
-            for msg in prompt.messages:
-                assert isinstance(msg, PromptMessage)
-                assert msg.role in ["user", "assistant"]
-                assert isinstance(msg.content, TextContent)
-                assert isinstance(msg.content.text, str)
-                assert len(msg.content.text) > 0
+    async def test_prompt_tools_exist(self, mcp):
+        """Every tool a prompt names is registered on the server.
+
+        The prompts name tools so the model can follow them; a renamed or
+        removed tool would leave a prompt pointing at nothing.
+        """
+        server = FastMCP(name="tools")
+        register_tools(server)
+        tool_names = {t.name for t in await server.list_tools()}
+        # Any snake_case word that starts with a registered tool's verb
+        # (list_, create_, upload_, ...) is read as a tool name, so a
+        # misspelled or removed tool is caught whatever its verb.
+        verbs = sorted({t.split("_", 1)[0] for t in tool_names})
+        tool_word = re.compile(rf"\b(?:{'|'.join(verbs)})_[a-z_]+\b")
+
+        for name, expected in PROMPT_ARGUMENTS.items():
+            text = await _render(mcp, name, {arg: "x" for arg in expected["required"]})
+            named = set(tool_word.findall(text))
+            assert named, name
+            assert named <= tool_names, (name, named - tool_names)

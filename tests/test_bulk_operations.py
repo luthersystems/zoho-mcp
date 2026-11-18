@@ -19,7 +19,7 @@ class TestBulkInvoiceOperations:
     async def test_bulk_create_invoices_success(self):
         """Test successful bulk invoice creation."""
         # Mock the create_invoice function
-        with patch("zoho_mcp.bulk_operations.create_invoice") as mock_create:
+        with patch("zoho_mcp.bulk_operations.create_invoice", autospec=True) as mock_create:
             mock_create.side_effect = [
                 {
                     "invoice": {
@@ -87,16 +87,17 @@ class TestBulkInvoiceOperations:
             assert mock_create.call_count == 3
             
             # Check that reference numbers were added for first two invoices
-            call_args = mock_create.call_args_list
-            assert "reference_number" in call_args[0][1]
-            assert "BULK-" in call_args[0][1]["reference_number"]
-            assert call_args[2][1]["reference_number"] == "CUSTOM-REF"
+            # autospec checks each call against create_invoice's real
+            # signature, which takes the invoice fields as kwargs=dict.
+            sent = [c.kwargs["kwargs"] for c in mock_create.call_args_list]
+            assert "BULK-" in sent[0]["reference_number"]
+            assert sent[2]["reference_number"] == "CUSTOM-REF"
     
     @pytest.mark.asyncio
     async def test_bulk_create_invoices_with_failures(self):
         """Test bulk invoice creation with some failures."""
         # Mock create_invoice to fail on second call
-        with patch("zoho_mcp.bulk_operations.create_invoice") as mock_create:
+        with patch("zoho_mcp.bulk_operations.create_invoice", autospec=True) as mock_create:
             mock_create.side_effect = [
                 {
                     "invoice": {
@@ -146,7 +147,7 @@ class TestBulkInvoiceOperations:
         def progress_callback(current, total):
             callback_calls.append((current, total))
         
-        with patch("zoho_mcp.bulk_operations.create_invoice") as mock_create:
+        with patch("zoho_mcp.bulk_operations.create_invoice", autospec=True) as mock_create:
             mock_create.return_value = {
                 "invoice": {
                     "invoice_id": "INV-001",
@@ -175,7 +176,7 @@ class TestBulkExpenseOperations:
     @pytest.mark.asyncio
     async def test_bulk_record_expenses_success(self):
         """Test successful bulk expense recording."""
-        with patch("zoho_mcp.bulk_operations.create_expense") as mock_create:
+        with patch("zoho_mcp.bulk_operations.create_expense", autospec=True) as mock_create:
             mock_create.side_effect = [
                 {
                     "expense": {
@@ -199,12 +200,14 @@ class TestBulkExpenseOperations:
                 {
                     "date": "2023-01-01",
                     "account_id": "ACC-001",
+                    "paid_through_account_id": "PAID-001",
                     "amount": 100.00,
                     "description": "Office supplies",
                 },
                 {
                     "date": "2023-01-02",
                     "account_id": "ACC-002",
+                    "paid_through_account_id": "PAID-001",
                     "amount": 250.00,
                     "description": "Flight tickets",
                 },
@@ -227,7 +230,7 @@ class TestBulkExpenseOperations:
     @pytest.mark.asyncio
     async def test_bulk_record_expenses_with_failures(self):
         """Test bulk expense recording with failures."""
-        with patch("zoho_mcp.bulk_operations.create_expense") as mock_create:
+        with patch("zoho_mcp.bulk_operations.create_expense", autospec=True) as mock_create:
             mock_create.side_effect = [
                 {
                     "expense": {
@@ -241,8 +244,18 @@ class TestBulkExpenseOperations:
             ]
             
             expenses_data = [
-                {"date": "2023-01-01", "account_id": "ACC-001", "amount": 100.00},
-                {"date": "2023-01-02", "account_id": "INVALID", "amount": 250.00},
+                {
+                    "date": "2023-01-01",
+                    "account_id": "ACC-001",
+                    "paid_through_account_id": "PAID-001",
+                    "amount": 100.00,
+                },
+                {
+                    "date": "2023-01-02",
+                    "account_id": "INVALID",
+                    "paid_through_account_id": "PAID-001",
+                    "amount": 250.00,
+                },
             ]
             
             result = await bulk_record_expenses(expenses_data)
@@ -340,3 +353,39 @@ class TestBatchProcessing:
         assert callback_calls[0] == (1, 3)  # First batch
         assert callback_calls[1] == (2, 3)  # Second batch
         assert callback_calls[2] == (3, 3)  # Third batch
+
+class TestBulkInvoiceEdgeCases:
+    """Responses without a body or a total, and the caller's input."""
+
+    @pytest.mark.asyncio
+    async def test_created_invoice_without_body_counts_as_created(self):
+        """An invoice with no body or no total in the response is still created.
+
+        Reporting it as failed would invite a retry that creates it twice.
+        """
+        with patch("zoho_mcp.bulk_operations.create_invoice", autospec=True) as mock_create:
+            mock_create.side_effect = [
+                {"invoice": None},
+                {"invoice": {"invoice_id": "INV-2"}},
+            ]
+
+            result = await bulk_create_invoices(
+                [{"customer_id": "C1", "line_items": []}, {"customer_id": "C2", "line_items": []}]
+            )
+
+        assert result["summary"]["successful"] == 2
+        assert result["summary"]["failed"] == 0
+        assert result["summary"]["total_amount"] == 0
+
+    @pytest.mark.asyncio
+    async def test_input_is_not_modified(self):
+        """The generated reference number does not leak into the caller's dicts."""
+        invoices_data = [{"customer_id": "C1", "line_items": []}]
+        with patch("zoho_mcp.bulk_operations.create_invoice", autospec=True) as mock_create:
+            mock_create.return_value = {"invoice": {"invoice_id": "INV-1", "total": 5}}
+
+            await bulk_create_invoices(invoices_data)
+
+        assert invoices_data == [{"customer_id": "C1", "line_items": []}]
+        sent = mock_create.call_args.kwargs["kwargs"]
+        assert sent["reference_number"].startswith("BULK-")

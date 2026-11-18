@@ -33,7 +33,13 @@ click>=8.1.0
 
 # Async
 asyncio>=3.4.3
-anyio>=3.7.0
+# anyio also comes in through mcp, whose 1.10 floor asks for 4.9. Our floor
+# keeps out releases with GHSA-82r6-8w77-94w6 and GHSA-5p39-cfhj-2xmp,
+# fixed in 4.14.2.
+anyio>=4.14.2
+# idna comes in through httpx and anyio. The floor keeps out releases with
+# GHSA-65pc-fj4g-8rjx, fixed in 3.15.
+idna>=3.15
 
 # Web Server (for HTTP/SSE transport)
 starlette>=0.27.0

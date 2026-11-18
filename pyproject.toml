@@ -31,15 +31,17 @@ dependencies = [
     # 1.10.0 is the first release whose FastMCP.resource() takes title=.
     "mcp>=1.10.0,<2",
     "httpx>=0.25.0",
-    # certifi and python-multipart are transitive; their floors keep out
-    # releases with known advisories (see requirements.txt).
+    # certifi, idna and python-multipart are transitive, and anyio also comes
+    # in through mcp; their floors keep out releases with known advisories
+    # (see requirements.txt).
     "certifi>=2026.10.18",
     "python-dotenv>=1.0.0",
     "pydantic>=2.4.0",
     "email-validator>=2.0.0",
     "structlog>=23.1.0",
     "click>=8.1.0",
-    "anyio>=3.7.0",
+    "anyio>=4.14.2",
+    "idna>=3.15",
     "starlette>=0.27.0",
     "uvicorn>=0.23.0",
     "python-multipart>=0.0.31",

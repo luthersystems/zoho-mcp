@@ -20,3 +20,6 @@ config/.token_cache
 MANIFEST
 *.tar.gz
 *.whl
+
+# pytest-cov data
+.coverage

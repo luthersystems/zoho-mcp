@@ -5,7 +5,7 @@ This module contains tests for the Zoho Books sales order management tools.
 """
 
 import unittest
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import AsyncMock, patch, Mock, ANY
 from datetime import date
 
 from zoho_mcp.tools.sales import (
@@ -18,11 +18,11 @@ from zoho_mcp.tools.sales import (
 from zoho_mcp.tools.api import ZohoAPIError
 
 
-class TestListSalesOrders(unittest.TestCase):
+class TestListSalesOrders(unittest.IsolatedAsyncioTestCase):
     """Tests for the list_sales_orders function."""
     
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_list_sales_orders_success(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_list_sales_orders_success(self, mock_api_request):
         """Test successful listing of sales orders."""
         # Mock API response
         mock_api_request.return_value = {
@@ -57,7 +57,7 @@ class TestListSalesOrders(unittest.TestCase):
         }
         
         # Call the function
-        result = list_sales_orders(
+        result = await list_sales_orders(
             page=1,
             page_size=25,
             status="all",
@@ -75,7 +75,7 @@ class TestListSalesOrders(unittest.TestCase):
                 "per_page": 25,
                 "filter_by": "all",
                 "sort_column": "date",
-                "sort_order": "D",
+                "sort_order": "descending",
             },
         )
         
@@ -87,8 +87,8 @@ class TestListSalesOrders(unittest.TestCase):
         self.assertEqual(result["total"], 2)
         self.assertFalse(result["has_more_page"])
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_list_sales_orders_with_date_range(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_list_sales_orders_with_date_range(self, mock_api_request):
         """Test listing sales orders with date range filters."""
         # Mock API response
         mock_api_request.return_value = {
@@ -99,7 +99,7 @@ class TestListSalesOrders(unittest.TestCase):
         }
         
         # Call the function with date range
-        result = list_sales_orders(
+        result = await list_sales_orders(
             date_range_start=date(2023, 5, 1),
             date_range_end="2023-05-31",
         )
@@ -110,22 +110,22 @@ class TestListSalesOrders(unittest.TestCase):
         self.assertEqual(call_args["params"]["date_start"], "2023-05-01")
         self.assertEqual(call_args["params"]["date_end"], "2023-05-31")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_list_sales_orders_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_list_sales_orders_error(self, mock_api_request):
         """Test handling of API errors when listing sales orders."""
         # Mock API error
         mock_api_request.side_effect = ZohoAPIError(400, "Invalid request")
         
         # Assert the error is propagated
         with self.assertRaises(ZohoAPIError):
-            list_sales_orders()
+            await list_sales_orders()
 
 
-class TestCreateSalesOrder(unittest.TestCase):
+class TestCreateSalesOrder(unittest.IsolatedAsyncioTestCase):
     """Tests for the create_sales_order function."""
     
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_create_sales_order_success(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_create_sales_order_success(self, mock_api_request):
         """Test successful creation of a sales order."""
         # Mock API response
         mock_api_request.return_value = {
@@ -161,7 +161,7 @@ class TestCreateSalesOrder(unittest.TestCase):
         ]
         
         # Call the function
-        result = create_sales_order(
+        result = await create_sales_order(
             customer_id="67890",
             line_items=line_items,
             date="2023-05-01",
@@ -175,7 +175,7 @@ class TestCreateSalesOrder(unittest.TestCase):
         self.assertEqual(mock_api_request.call_args[0][1], "/salesorders")
         
         # Check JSON payload
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         self.assertEqual(json_data["customer_id"], "67890")
         self.assertEqual(len(json_data["line_items"]), 2)
         self.assertEqual(json_data["date"], "2023-05-01")
@@ -186,8 +186,8 @@ class TestCreateSalesOrder(unittest.TestCase):
         self.assertEqual(result["salesorder"]["salesorder_id"], "12345")
         self.assertEqual(result["message"], "Sales order created successfully")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_create_sales_order_with_all_fields(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_create_sales_order_with_all_fields(self, mock_api_request):
         """Test creation of a sales order with all optional fields."""
         # Mock API response
         mock_api_request.return_value = {
@@ -197,7 +197,7 @@ class TestCreateSalesOrder(unittest.TestCase):
         }
         
         # Call the function with all fields
-        result = create_sales_order(
+        result = await create_sales_order(
             customer_id="67890",
             line_items=[{"item_id": "item1", "name": "Product 1", "rate": 100.00, "quantity": 2}],
             date="2023-05-01",
@@ -226,7 +226,7 @@ class TestCreateSalesOrder(unittest.TestCase):
         
         # Assert the API was called with all fields
         mock_api_request.assert_called_once()
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         
         # Check a few key fields
         self.assertEqual(json_data["customer_id"], "67890")
@@ -240,12 +240,12 @@ class TestCreateSalesOrder(unittest.TestCase):
         # Assert the result is returned properly
         self.assertEqual(result["salesorder"]["salesorder_id"], "12345")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_create_sales_order_validation_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_create_sales_order_validation_error(self, mock_api_request):
         """Test validation error when creating a sales order."""
         # Try to create a sales order without required fields
         with self.assertRaises(ValueError):
-            create_sales_order(
+            await create_sales_order(
                 customer_id="67890",
                 line_items=[{"description": "Invalid line item without rate or quantity"}],
             )
@@ -253,25 +253,25 @@ class TestCreateSalesOrder(unittest.TestCase):
         # Assert the API was not called
         mock_api_request.assert_not_called()
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_create_sales_order_api_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_create_sales_order_api_error(self, mock_api_request):
         """Test handling of API errors when creating a sales order."""
         # Mock API error
         mock_api_request.side_effect = ZohoAPIError(400, "Invalid request")
         
         # Attempt to create a sales order
         with self.assertRaises(ZohoAPIError):
-            create_sales_order(
+            await create_sales_order(
                 customer_id="67890",
                 line_items=[{"item_id": "item1", "rate": 100.00, "quantity": 2}],
             )
 
 
-class TestGetSalesOrder(unittest.TestCase):
+class TestGetSalesOrder(unittest.IsolatedAsyncioTestCase):
     """Tests for the get_sales_order function."""
     
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_get_sales_order_success(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_get_sales_order_success(self, mock_api_request):
         """Test successful retrieval of a sales order."""
         # Mock API response
         mock_api_request.return_value = {
@@ -292,7 +292,7 @@ class TestGetSalesOrder(unittest.TestCase):
         }
         
         # Call the function
-        result = get_sales_order("12345")
+        result = await get_sales_order("12345")
         
         # Assert the API was called correctly
         mock_api_request.assert_called_once_with("GET", "/salesorders/12345")
@@ -302,8 +302,8 @@ class TestGetSalesOrder(unittest.TestCase):
         self.assertEqual(result["salesorder"]["customer_name"], "Test Customer")
         self.assertEqual(len(result["salesorder"]["line_items"]), 1)
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_get_sales_order_not_found(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_get_sales_order_not_found(self, mock_api_request):
         """Test retrieval of a non-existent sales order."""
         # Mock API response for not found
         mock_api_request.return_value = {
@@ -313,7 +313,7 @@ class TestGetSalesOrder(unittest.TestCase):
         }
         
         # Call the function
-        result = get_sales_order("nonexistent")
+        result = await get_sales_order("nonexistent")
         
         # Assert the API was called correctly
         mock_api_request.assert_called_once_with("GET", "/salesorders/nonexistent")
@@ -322,36 +322,36 @@ class TestGetSalesOrder(unittest.TestCase):
         self.assertIsNone(result["salesorder"])
         self.assertEqual(result["message"], "Sales order not found")
 
-    def test_get_sales_order_invalid_id(self):
+    async def test_get_sales_order_invalid_id(self):
         """Test retrieval with an invalid sales order ID."""
         # Test with None
         with self.assertRaises(ValueError):
-            get_sales_order(None)
+            await get_sales_order(None)
         
         # Test with empty string
         with self.assertRaises(ValueError):
-            get_sales_order("")
+            await get_sales_order("")
         
         # Test with non-string
         with self.assertRaises(ValueError):
-            get_sales_order(12345)
+            await get_sales_order(12345)
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_get_sales_order_api_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_get_sales_order_api_error(self, mock_api_request):
         """Test handling of API errors when retrieving a sales order."""
         # Mock API error
         mock_api_request.side_effect = ZohoAPIError(404, "Sales order not found")
         
         # Attempt to get a sales order
         with self.assertRaises(ZohoAPIError):
-            get_sales_order("12345")
+            await get_sales_order("12345")
 
 
-class TestUpdateSalesOrder(unittest.TestCase):
+class TestUpdateSalesOrder(unittest.IsolatedAsyncioTestCase):
     """Tests for the update_sales_order function."""
     
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_update_sales_order_success(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_update_sales_order_success(self, mock_api_request):
         """Test successful update of a sales order."""
         # Mock API response
         mock_api_request.return_value = {
@@ -366,7 +366,7 @@ class TestUpdateSalesOrder(unittest.TestCase):
         }
         
         # Call the function
-        result = update_sales_order(
+        result = await update_sales_order(
             salesorder_id="12345",
             notes="Updated notes",
             shipment_date="2023-06-01",
@@ -378,7 +378,7 @@ class TestUpdateSalesOrder(unittest.TestCase):
         self.assertEqual(mock_api_request.call_args[0][1], "/salesorders/12345")
         
         # Check JSON payload
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         self.assertEqual(json_data["notes"], "Updated notes")
         self.assertEqual(json_data["shipment_date"], "2023-06-01")
         
@@ -386,8 +386,8 @@ class TestUpdateSalesOrder(unittest.TestCase):
         self.assertEqual(result["salesorder"]["salesorder_id"], "12345")
         self.assertEqual(result["message"], "Sales order updated successfully")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_update_sales_order_line_items(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_update_sales_order_line_items(self, mock_api_request):
         """Test updating sales order line items."""
         # Mock API response
         mock_api_request.return_value = {
@@ -411,7 +411,7 @@ class TestUpdateSalesOrder(unittest.TestCase):
         ]
         
         # Call the function
-        result = update_sales_order(
+        result = await update_sales_order(
             salesorder_id="12345",
             line_items=line_items,
         )
@@ -420,52 +420,52 @@ class TestUpdateSalesOrder(unittest.TestCase):
         mock_api_request.assert_called_once()
         
         # Check JSON payload
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         self.assertEqual(len(json_data["line_items"]), 2)
         self.assertEqual(json_data["line_items"][0]["line_item_id"], "line1")
         self.assertEqual(json_data["line_items"][0]["quantity"], 3)
         self.assertEqual(json_data["line_items"][1]["item_id"], "item2")
         self.assertEqual(json_data["line_items"][1]["name"], "New Product")
 
-    def test_update_sales_order_no_fields(self):
+    async def test_update_sales_order_no_fields(self):
         """Test update with no fields to update."""
         # Try to update without providing any fields
         with self.assertRaises(ValueError):
-            update_sales_order(salesorder_id="12345")
+            await update_sales_order(salesorder_id="12345")
 
-    def test_update_sales_order_invalid_id(self):
+    async def test_update_sales_order_invalid_id(self):
         """Test update with an invalid sales order ID."""
         # Test with None
         with self.assertRaises(ValueError):
-            update_sales_order(salesorder_id=None, notes="Test")
+            await update_sales_order(salesorder_id=None, notes="Test")
         
         # Test with empty string
         with self.assertRaises(ValueError):
-            update_sales_order(salesorder_id="", notes="Test")
+            await update_sales_order(salesorder_id="", notes="Test")
         
         # Test with non-string
         with self.assertRaises(ValueError):
-            update_sales_order(salesorder_id=12345, notes="Test")
+            await update_sales_order(salesorder_id=12345, notes="Test")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_update_sales_order_api_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_update_sales_order_api_error(self, mock_api_request):
         """Test handling of API errors when updating a sales order."""
         # Mock API error
         mock_api_request.side_effect = ZohoAPIError(404, "Sales order not found")
         
         # Attempt to update a sales order
         with self.assertRaises(ZohoAPIError):
-            update_sales_order(
+            await update_sales_order(
                 salesorder_id="12345",
                 notes="Updated notes",
             )
 
 
-class TestConvertToInvoice(unittest.TestCase):
+class TestConvertToInvoice(unittest.IsolatedAsyncioTestCase):
     """Tests for the convert_to_invoice function."""
     
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_convert_to_invoice_success(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_convert_to_invoice_success(self, mock_api_request):
         """Test successful conversion of a sales order to an invoice."""
         # Mock API response
         mock_api_request.return_value = {
@@ -482,7 +482,7 @@ class TestConvertToInvoice(unittest.TestCase):
         }
         
         # Call the function
-        result = convert_to_invoice(
+        result = await convert_to_invoice(
             salesorder_id="12345",
             date="2023-06-01",
         )
@@ -493,7 +493,7 @@ class TestConvertToInvoice(unittest.TestCase):
         self.assertEqual(mock_api_request.call_args[0][1], "/salesorders/12345/convert")
         
         # Check JSON payload
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         self.assertEqual(json_data["salesorder_id"], "12345")
         self.assertEqual(json_data["date"], "2023-06-01")
         
@@ -502,8 +502,8 @@ class TestConvertToInvoice(unittest.TestCase):
         self.assertEqual(result["invoice"]["salesorder_id"], "12345")
         self.assertEqual(result["message"], "Sales order converted to invoice successfully")
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_convert_with_custom_invoice_number(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_convert_with_custom_invoice_number(self, mock_api_request):
         """Test conversion with a custom invoice number."""
         # Mock API response
         mock_api_request.return_value = {
@@ -513,7 +513,7 @@ class TestConvertToInvoice(unittest.TestCase):
         }
         
         # Call the function
-        result = convert_to_invoice(
+        result = await convert_to_invoice(
             salesorder_id="12345",
             ignore_auto_number_generation=True,
             invoice_number="INV-CUSTOM-001",
@@ -523,7 +523,7 @@ class TestConvertToInvoice(unittest.TestCase):
         mock_api_request.assert_called_once()
         
         # Check JSON payload
-        json_data = mock_api_request.call_args[1]["json"]
+        json_data = mock_api_request.call_args[1]["json_data"]
         self.assertEqual(json_data["salesorder_id"], "12345")
         self.assertEqual(json_data["ignore_auto_number_generation"], True)
         self.assertEqual(json_data["invoice_number"], "INV-CUSTOM-001")
@@ -532,24 +532,24 @@ class TestConvertToInvoice(unittest.TestCase):
         params = mock_api_request.call_args[1]["params"]
         self.assertEqual(params["ignore_auto_number_generation"], "true")
 
-    def test_convert_validation_error(self):
+    async def test_convert_validation_error(self):
         """Test validation errors when converting to invoice."""
         # Test with ignore_auto_number_generation=True but no invoice_number
         with self.assertRaises(ValueError):
-            convert_to_invoice(
+            await convert_to_invoice(
                 salesorder_id="12345",
                 ignore_auto_number_generation=True,
             )
 
-    @patch("zoho_mcp.tools.sales.zoho_api_request")
-    def test_convert_api_error(self, mock_api_request):
+    @patch("zoho_mcp.tools.sales.zoho_api_request_async", new_callable=AsyncMock)
+    async def test_convert_api_error(self, mock_api_request):
         """Test handling of API errors when converting to invoice."""
         # Mock API error
         mock_api_request.side_effect = ZohoAPIError(400, "Invalid request")
         
         # Attempt to convert a sales order
         with self.assertRaises(ZohoAPIError):
-            convert_to_invoice(salesorder_id="12345")
+            await convert_to_invoice(salesorder_id="12345")
 
 
 if __name__ == "__main__":

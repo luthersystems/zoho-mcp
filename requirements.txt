@@ -3,6 +3,9 @@ mcp>=1.6.0
 
 # HTTP Client
 httpx>=0.25.0
+# certifi comes in through httpx. The floor keeps out releases with
+# GHSA-6q48-6c7w-9gw2 (PYSEC-2026-4320), fixed in 2026.10.18.
+certifi>=2026.10.18
 
 # Environment Variables
 python-dotenv>=1.0.0
@@ -30,3 +33,7 @@ anyio>=3.7.0
 # Web Server (for HTTP/SSE transport)
 starlette>=0.27.0
 uvicorn>=0.23.0
+# python-multipart comes in through mcp, which asks only for >=0.0.9. The
+# floor keeps out the releases with the advisories fixed up to 0.0.31
+# (CVE-2024-53981, CVE-2026-24486, CVE-2026-42561, CVE-2026-53537..53540).
+python-multipart>=0.0.31

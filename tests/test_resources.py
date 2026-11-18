@@ -1,286 +1,175 @@
 """
 Test suite for Zoho Books MCP resources.
+
+The tests read each resource through a real FastMCP server (list_resources and
+read_resource), the path a client uses, with the Zoho API mocked out. An
+earlier version of these tests captured the decorated functions with a
+hand-written fake of mcp.resource; when the decorator's signature and the
+resource set changed, the fake went stale and the tests failed without saying
+anything about the resources themselves.
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from mcp.server.fastmcp import FastMCP
-from mcp.types import Resource, TextContent
 
 from zoho_mcp.resources import register_resources
 
-
-@pytest.fixture
-def mock_mcp():
-    """Create a mock FastMCP server instance."""
-    mcp = MagicMock(spec=FastMCP)
-    mcp.resource = MagicMock()
-    return mcp
-
-
-@pytest.fixture
-def mock_api_request():
-    """Create a mock for zoho_api_request_async."""
-    with patch("zoho_mcp.resources.zoho_api_request_async") as mock:
-        yield mock
+EXPECTED_URIS = {
+    "dashboard://summary",
+    "invoice://overdue",
+    "invoice://unpaid",
+    "payment://recent",
+}
 
 
 @pytest.fixture
-def mock_tools():
-    """Create mocks for the tools used by resources."""
-    with patch("zoho_mcp.resources.list_contacts") as mock_contacts, \
-         patch("zoho_mcp.resources.get_contact") as mock_get_contact, \
-         patch("zoho_mcp.resources.list_invoices") as mock_invoices, \
-         patch("zoho_mcp.resources.list_expenses") as mock_expenses, \
-         patch("zoho_mcp.resources.list_items") as mock_items:
-        
-        # Configure return values
-        mock_contacts.return_value = {
-            "contacts": [
-                {"contact_name": "Test Customer", "contact_type": "customer", "email": "test@example.com"},
-            ],
-            "total": 1,
-            "has_more_page": False,
-        }
-        
-        mock_get_contact.return_value = {
-            "contact": {
-                "contact_name": "Test Customer",
-                "contact_type": "customer",
-                "email": "test@example.com",
-                "phone": "123-456-7890",
-                "status": "active",
-            }
-        }
-        
-        mock_invoices.return_value = {
-            "invoices": [
-                {"invoice_number": "INV-001", "customer_name": "Test Customer", "total": 1000.00},
-            ],
-            "total": 1,
-            "has_more_page": False,
-        }
-        
-        mock_expenses.return_value = {
-            "expenses": [
-                {"date": "2023-01-01", "description": "Office supplies", "total": 50.00},
-            ],
-            "total": 1,
-            "has_more_page": False,
-        }
-        
-        mock_items.return_value = {
-            "items": [
-                {"name": "Test Item", "rate": 100.00, "product_type": "service"},
-            ],
-            "total": 1,
-            "has_more_page": False,
-        }
-        
-        yield {
-            "list_contacts": mock_contacts,
-            "get_contact": mock_get_contact,
-            "list_invoices": mock_invoices,
-            "list_expenses": mock_expenses,
-            "list_items": mock_items,
-        }
+def mcp():
+    """A real FastMCP server with the resources registered."""
+    server = FastMCP(name="test")
+    register_resources(server)
+    return server
+
+
+async def _read(mcp: FastMCP, uri: str) -> str:
+    """Read a resource through FastMCP and return its text."""
+    contents = list(await mcp.read_resource(uri))
+    assert len(contents) == 1
+    assert contents[0].mime_type == "text/plain"
+    return contents[0].content
 
 
 class TestResources:
     """Test suite for MCP resources."""
-    
-    def test_register_resources(self, mock_mcp):
-        """Test that all resources are registered with the MCP server."""
-        # Register resources
-        register_resources(mock_mcp)
-        
-        # Check that resource decorator was called for each resource
-        assert mock_mcp.resource.call_count == 10  # We have 10 resources
-        
-        # Check the URIs that were registered
-        registered_uris = [call[0][0] for call in mock_mcp.resource.call_args_list]
-        expected_uris = [
-            "dashboard://summary",
-            "invoice://overdue",
-            "invoice://unpaid",
-            "payment://recent",
-            "contact://list",
-            "contact://{contact_id}",
-            "invoice://list",
-            "expense://list",
-            "item://list",
-            "report://cash_flow",
-        ]
-        
-        for uri in expected_uris:
-            assert uri in registered_uris
-    
+
     @pytest.mark.asyncio
-    async def test_dashboard_summary_resource_direct(self, mock_api_request):
-        """Test the dashboard summary resource function directly."""
-        # Mock API responses
-        mock_api_request.side_effect = [
-            # Organizations response
-            {"organizations": [{"name": "Test Org", "organization_id": "123"}]},
-            # Overdue invoices response
-            {"page_context": {"total": 5}},
-            # Unpaid invoices response
-            {"page_context": {"total": 10}},
-            # Revenue response
-            {"invoices": [{"total": 1000}, {"total": 2000}]},
-        ]
-        
-        # Import and call the resource function directly
-        from zoho_mcp.resources import register_resources
-        mcp = MagicMock()
-        
-        # Capture the dashboard function when it's registered
-        dashboard_func = None
-        def capture_dashboard(uri):
-            def decorator(func):
-                nonlocal dashboard_func
-                if uri == "dashboard://summary":
-                    dashboard_func = func
-                return func
-            return decorator
-        
-        mcp.resource = capture_dashboard
-        register_resources(mcp)
-        
-        # Call the captured function
-        result = await dashboard_func()
-        
-        # Verify the result
-        assert isinstance(result, Resource)
-        assert result.uri == "dashboard://summary"
-        assert result.name == "Dashboard Summary"
-        assert len(result.contents) == 1
-        assert isinstance(result.contents[0], TextContent)
-        
-        # Check content includes key metrics
-        content = result.contents[0].text
-        assert "Overdue Invoices: 5" in content
-        assert "Unpaid Invoices: 10" in content
-        assert "Monthly Revenue: $3,000.00" in content
-    
+    async def test_register_resources(self, mcp):
+        """Every resource is listed, with a name and a description."""
+        resources = {str(r.uri): r for r in await mcp.list_resources()}
+        assert set(resources) == EXPECTED_URIS
+        for resource in resources.values():
+            assert resource.name
+            assert resource.description
+
     @pytest.mark.asyncio
-    async def test_overdue_invoices_resource_direct(self, mock_api_request):
-        """Test the overdue invoices resource function directly."""
-        # Mock API response
-        mock_api_request.return_value = {
-            "invoices": [
+    async def test_dashboard_summary(self, mcp):
+        """The dashboard reads the organization and dashboard endpoints."""
+        api = AsyncMock(
+            side_effect=[
+                {"organizations": [{"name": "Test Org", "currency_code": "EUR"}]},
                 {
-                    "invoice_number": "INV-001",
-                    "customer_name": "Test Customer",
-                    "balance": 500.00,
-                    "due_date": "2023-01-01",
-                }
+                    "dashboard": {
+                        "total_revenue": 3000,
+                        "total_receivables": 1500.5,
+                        "overdue_invoices_count": 5,
+                    }
+                },
             ]
-        }
-        
-        # Import and call the resource function directly
-        from zoho_mcp.resources import register_resources
-        mcp = MagicMock()
-        
-        # Capture the overdue invoices function
-        overdue_func = None
-        def capture_overdue(uri):
-            def decorator(func):
-                nonlocal overdue_func
-                if uri == "invoice://overdue":
-                    overdue_func = func
-                return func
-            return decorator
-        
-        mcp.resource = capture_overdue
-        register_resources(mcp)
-        
-        # Call the captured function
-        result = await overdue_func()
-        
-        # Verify the result
-        assert isinstance(result, Resource)
-        assert result.uri == "invoice://overdue"
-        assert result.name == "Overdue Invoices"
-        
-        # Check content includes invoice details
-        content = result.contents[0].text
-        assert "INV-001" in content
-        assert "Test Customer" in content
-        assert "$500.00" in content
-    
+        )
+        with patch("zoho_mcp.resources.zoho_api_request_async", api):
+            text = await _read(mcp, "dashboard://summary")
+
+        assert [c.args for c in api.call_args_list] == [
+            ("GET", "/organizations"),
+            ("GET", "/dashboard"),
+        ]
+        assert "**Organization**: Test Org" in text
+        assert "**Currency**: EUR" in text
+        assert "Total Income: 3,000.00" in text
+        assert "Total Receivables: 1,500.50" in text
+        assert "Number of Overdue Invoices: 5" in text
+
     @pytest.mark.asyncio
-    async def test_contact_details_resource_direct(self, mock_tools):
-        """Test the contact details resource function directly."""
-        # Import and call the resource function directly
-        from zoho_mcp.resources import register_resources
-        mcp = MagicMock()
-        
-        # Capture the contact details function
-        contact_func = None
-        def capture_contact(uri):
-            def decorator(func):
-                nonlocal contact_func
-                if uri == "contact://{contact_id}":
-                    contact_func = func
-                return func
-            return decorator
-        
-        mcp.resource = capture_contact
-        register_resources(mcp)
-        
-        # Call the captured function
-        result = await contact_func("contact_123")
-        
-        # Verify the result
-        assert isinstance(result, Resource)
-        assert result.uri == "contact://contact_123"
-        assert result.name == "Contact: Test Customer"
-        
-        # Check that get_contact was called with the correct ID
-        mock_tools["get_contact"].assert_called_once_with("contact_123")
-        
-        # Check content includes contact details
-        content = result.contents[0].text
-        assert "Test Customer" in content
-        assert "test@example.com" in content
-        assert "123-456-7890" in content
-    
-    @pytest.mark.asyncio  
-    async def test_contact_list_resource_direct(self, mock_tools):
-        """Test the contact list resource function directly."""
-        # Import and call the resource function directly
-        from zoho_mcp.resources import register_resources
-        mcp = MagicMock()
-        
-        # Capture the contact list function
-        list_func = None
-        def capture_list(uri):
-            def decorator(func):
-                nonlocal list_func
-                if uri == "contact://list":
-                    list_func = func
-                return func
-            return decorator
-        
-        mcp.resource = capture_list
-        register_resources(mcp)
-        
-        # Call the captured function
-        result = await list_func()
-        
-        # Verify the result
-        assert isinstance(result, Resource)
-        assert result.uri == "contact://list"
-        assert result.name == "Contact List"
-        
-        # Check that list_contacts was called
-        mock_tools["list_contacts"].assert_called_once_with(page_size=100)
-        
-        # Check content includes contact details
-        content = result.contents[0].text
-        assert "Test Customer" in content
-        assert "customer" in content
-        assert "test@example.com" in content
+    async def test_overdue_invoices(self, mcp):
+        """The overdue list asks for overdue invoices, oldest due date first."""
+        list_invoices = AsyncMock(
+            return_value={
+                "invoices": [
+                    {
+                        "invoice_number": "INV-001",
+                        "customer_name": "Test Customer",
+                        "balance": 500.00,
+                        "due_date": "2023-01-01",
+                        "overdue_days": 12,
+                    },
+                    {"invoice_number": "INV-002", "customer_name": "Other", "balance": 250},
+                ]
+            }
+        )
+        with patch("zoho_mcp.resources.list_invoices", list_invoices):
+            text = await _read(mcp, "invoice://overdue")
+
+        list_invoices.assert_awaited_once_with(
+            status="overdue", sort_column="due_date", sort_order="ascending", page_size=50
+        )
+        assert "**Total Count**: 2" in text
+        assert "**Total Overdue Amount**: 750.00" in text
+        assert "INV-001" in text
+        assert "Test Customer" in text
+        assert "**Days Overdue**: 12" in text
+
+    @pytest.mark.asyncio
+    async def test_overdue_invoices_empty(self, mcp):
+        """With no overdue invoices the resource says so."""
+        with patch(
+            "zoho_mcp.resources.list_invoices", AsyncMock(return_value={"invoices": []})
+        ):
+            text = await _read(mcp, "invoice://overdue")
+
+        assert "No overdue invoices found" in text
+
+    @pytest.mark.asyncio
+    async def test_unpaid_invoices(self, mcp):
+        """The unpaid list totals the balances and counts the overdue ones."""
+        list_invoices = AsyncMock(
+            return_value={
+                "invoices": [
+                    {"invoice_number": "INV-001", "balance": 100, "status": "overdue"},
+                    {"invoice_number": "INV-002", "balance": 50.25, "status": "sent"},
+                ]
+            }
+        )
+        with patch("zoho_mcp.resources.list_invoices", list_invoices):
+            text = await _read(mcp, "invoice://unpaid")
+
+        list_invoices.assert_awaited_once_with(
+            status="unpaid", sort_column="date", sort_order="descending", page_size=50
+        )
+        assert "**Total Unpaid Amount**: 150.25" in text
+        assert "**Overdue Invoices**: 1" in text
+        assert "🔴 Invoice #INV-001" in text
+        assert "🟡 Invoice #INV-002" in text
+
+    @pytest.mark.asyncio
+    async def test_recent_payments(self, mcp):
+        """Recent payments covers the last 30 days and lists each payment."""
+        api = AsyncMock(
+            return_value={
+                "customerpayments": [
+                    {
+                        "payment_number": "PMT-1",
+                        "customer_name": "Test Customer",
+                        "amount": 1200,
+                        "invoices": [{"invoice_number": "INV-001"}, {"invoice_number": "INV-002"}],
+                    }
+                ]
+            }
+        )
+        with patch("zoho_mcp.resources.zoho_api_request_async", api):
+            text = await _read(mcp, "payment://recent")
+
+        args, kwargs = api.call_args
+        assert args == ("GET", "/customerpayments")
+        assert set(kwargs["params"]) == {"date_start", "date_end", "sort_column", "sort_order"}
+        assert "**Total Received**: 1,200.00" in text
+        assert "PMT-1" in text
+        assert "**Invoice(s)**: INV-001, INV-002" in text
+
+    @pytest.mark.asyncio
+    async def test_resource_error_propagates(self, mcp):
+        """An API failure surfaces as an error, not as an empty resource."""
+        api = AsyncMock(side_effect=RuntimeError("Zoho is down"))
+        with patch("zoho_mcp.resources.zoho_api_request_async", api):
+            with pytest.raises(Exception, match="Zoho is down"):
+                await mcp.read_resource("payment://recent")

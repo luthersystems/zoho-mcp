@@ -1,7 +1,5 @@
 """Tests for the OAuth flow module."""
 
-import os
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -31,20 +29,6 @@ def mock_settings():
         mock_settings.ZOHO_AUTH_BASE_URL = "https://accounts.zoho.com/oauth/v2"
         mock_settings.ZOHO_OAUTH_SCOPE = "ZohoBooks.fullaccess.all"
         yield mock_settings
-
-
-@pytest.fixture
-def temp_env_file():
-    """Fixture to create a temporary .env file."""
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(b"ZOHO_CLIENT_ID=test_client_id\nZOHO_CLIENT_SECRET=test_client_secret\n")
-        tmp_path = tmp.name
-    
-    yield Path(tmp_path)
-    
-    # Clean up
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
 
 
 class TestOAuthFlow:
@@ -104,20 +88,39 @@ class TestOAuthFlow:
         assert OAuthCallbackHandler.auth_code is None
         assert OAuthCallbackHandler.error == "access_denied"
     
-    def test_update_env_file_create(self, temp_env_file):
-        """Test creating/updating .env file with refresh token."""
-        with mock.patch('zoho_mcp.auth_flow.Path') as mock_path:
-            mock_path.return_value.parent.parent.__truediv__.return_value.__truediv__.return_value = temp_env_file
-            
-            # Update with new refresh token
-            update_env_file("test_refresh_token")
-            
-            # Check that file was updated
-            with open(temp_env_file, "r") as f:
-                content = f.read()
-                assert "ZOHO_REFRESH_TOKEN=test_refresh_token" in content
-                assert "ZOHO_CLIENT_ID=test_client_id" in content
-    
+    def test_update_env_file_create(self, tmp_path, monkeypatch):
+        """Test adding the refresh token to an existing ~/.zoho-mcp/.env.
+
+        Path.home is pointed at a temporary directory. An earlier version of
+        this test replaced the whole Path class with a mock, so env_path was a
+        MagicMock; open() turned it into file descriptor 1 and the test wrote
+        to and then closed the process's stdout.
+        """
+        env_file = tmp_path / ".zoho-mcp" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text(
+            "ZOHO_CLIENT_ID=test_client_id\nZOHO_CLIENT_SECRET=test_client_secret\n"
+        )
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+        update_env_file("test_refresh_token")
+
+        content = env_file.read_text()
+        assert "ZOHO_REFRESH_TOKEN=test_refresh_token" in content
+        assert "ZOHO_CLIENT_ID=test_client_id" in content
+        assert "ZOHO_CLIENT_SECRET=test_client_secret" in content
+
+    def test_update_env_file_replaces_token(self, tmp_path, monkeypatch):
+        """Test that a second token replaces the first rather than adding a line."""
+        env_file = tmp_path / ".zoho-mcp" / ".env"
+        env_file.parent.mkdir()
+        env_file.write_text("ZOHO_REFRESH_TOKEN=old_token\n")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+        update_env_file("new_token")
+
+        assert env_file.read_text() == "ZOHO_REFRESH_TOKEN=new_token\n"
+
     @mock.patch('zoho_mcp.auth_flow.httpx.post')
     def test_exchange_code_for_token_success(self, mock_post, mock_settings):
         """Test successful token exchange."""

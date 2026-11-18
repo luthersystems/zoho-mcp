@@ -96,8 +96,6 @@ For local development in Claude Desktop:
 - **invoice://overdue** - Overdue invoices list
 - **invoice://unpaid** - Unpaid invoices
 - **payment://recent** - Recent payments
-- **contact://list** - All contacts
-- **expenses://summary** - Expense overview
 
 ### Prompts
 
